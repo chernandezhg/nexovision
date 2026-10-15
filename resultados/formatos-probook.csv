@@ -1,0 +1,4 @@
+formato,resolucion,preprocesamiento_ms,inferencia_ms,posprocesamiento_ms,total_ms
+PyTorch,256x320,0.9,13.8,0.6,15.3
+ONNX,320x320,3.7,21.9,22.3,47.9
+OpenVINO,320x320,0.9,15.2,0.9,17.0
