@@ -1,0 +1,2 @@
+c75809eaa6fef9655acc76f38a4a60e9988d48e69dca75efa6cf5ad0930d6379  yolo11n_openvino_model/yolo11n.xml
+6256b9cabfb12edff0acd994172ef78e2616fc66a56cf03df402be66b9c543f3  yolo11n_openvino_model/yolo11n.bin
