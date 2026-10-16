@@ -16,7 +16,12 @@ parser.add_argument("--imgsz", type=int, default=320)
 parser.add_argument("--conf", type=float, default=0.35)
 parser.add_argument("--max-pending", type=int, default=3)
 parser.add_argument("--timeout", type=float, default=10)
+parser.add_argument("--queue", default="celery", help="Cola Celery de destino")
 args = parser.parse_args()
+if args.max_pending < 1 or args.timeout <= 0:
+    parser.error("--max-pending y --timeout deben ser mayores que cero")
+if not args.queue.strip():
+    parser.error("--queue no puede estar vacía")
 
 root = Path(__file__).resolve().parents[1]
 output_dir = root / "resultados"
@@ -42,7 +47,7 @@ with csv_path.open("w", newline="") as csv_file:
     writer = csv.writer(csv_file)
     writer.writerow([
         "timestamp", "task_id", "worker", "roundtrip_ms",
-        "worker_ms", "inference_ms", "detections"
+        "worker_ms", "inference_ms", "detections", "queue"
     ])
 
     try:
@@ -64,16 +69,17 @@ with csv_path.open("w", newline="") as csv_file:
                         encoded
                     ).decode("ascii")
 
-                    task = infer_frame.delay(
-                        jpeg_base64,
-                        args.imgsz,
-                        args.conf,
+                    sent = time.perf_counter()
+                    task = infer_frame.apply_async(
+                        args=[jpeg_base64, args.imgsz, args.conf],
+                        queue=args.queue,
+                        expires=args.timeout,
                     )
 
                     pending.append({
                         "task": task,
                         "frame": frame.copy(),
-                        "sent": time.perf_counter(),
+                        "sent": sent,
                     })
 
             now = time.perf_counter()
@@ -158,6 +164,7 @@ with csv_path.open("w", newline="") as csv_file:
                             result["total_worker_ms"],
                             result["inference_ms"],
                             len(result["detections"]),
+                            args.queue,
                         ])
                         csv_file.flush()
 
