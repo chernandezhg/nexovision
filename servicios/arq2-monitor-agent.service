@@ -1,0 +1,18 @@
+[Unit]
+Description=Agente de monitoreo de Pavilion para ARQ2
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=user
+WorkingDirectory=/home/user/arq2-camera
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/user/arq2-camera/.venv/bin/python -m src.monitor agent --bind 192.168.100.11 --port 8765 --interface enxec9a0c000d47
+Restart=always
+RestartSec=5
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

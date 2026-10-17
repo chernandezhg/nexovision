@@ -1,6 +1,22 @@
-# ARQ2 — Clúster local de inferencia de visión
+# NexoVisión — Inteligencia artificial local en clúster
 
-Proyecto académico con dos laptops Linux, cámara integrada de la ProBook, modelo YOLO11n en OpenVINO y procesamiento CPU distribuido con Celery/Redis. La operación puede realizarse sin Internet una vez instalados los paquetes y almacenado el modelo en ambas laptops. La aceptación del hardware de laptops se basa en la aclaración docente comunicada en la conversación y debe respaldarse con su evidencia; el PDF original restringe el hardware. pfSense se omite por indicación del usuario.
+Proyecto de Arquitectura de Computadoras II que distribuye la detección de objetos entre las CPUs de dos laptops Linux conectadas por Ethernet. Utiliza la cámara integrada de ProBook, YOLO11n exportado a OpenVINO y una cola compartida de Celery con Redis. Incluye monitoreo de recursos, continuidad del procesamiento ante la ausencia de Pavilion y servicios supervisados para su reincorporación al restablecer el enlace. La operación puede realizarse sin Internet una vez instaladas las dependencias y almacenado el modelo en ambos nodos.
+
+**Autor:** Christopher José Hernández Gramajo · **Carné:** 0900-23-8598 · **Sección:** B.
+
+**Universidad:** Universidad Mariano Gálvez de Guatemala. **Docente:** Alejandro Alberto Garcia Arrecis.
+
+## Video e informe
+
+- [Ver presentación y demostración en YouTube](https://youtu.be/gdchqYcIsXI).
+- [Consultar el informe técnico final en PDF](docs/informe-tecnico-arq2.pdf).
+- [Archivos de servicios systemd](servicios/).
+
+El video permanece alojado en YouTube; este repositorio conserva su enlace, no el archivo de video. El informe incluye la arquitectura, las mediciones, sus limitaciones y el enlace audiovisual en el anexo D.
+
+![Montaje físico de NexoVisión con Pavilion, ProBook y switch](docs/evidencias/01-montaje.jpeg)
+
+Las capturas de [detecciones](docs/evidencias/02-detecciones.png) y [monitoreo bajo carga](docs/evidencias/03-monitor-carga.png) complementan la documentación. El informe distingue sus valores instantáneos de las estadísticas calculadas a partir de los CSV.
 
 ## Arquitectura implementada
 
@@ -25,7 +41,7 @@ El switch dedicado no necesita conexión al router. No se configura gateway para
 | Panel de monitoreo | `127.0.0.1:8766/TCP`, HTTP | Acceso desde navegador local de ProBook |
 | Cola de inferencia | `cluster` | Los dos workers consumen de la misma cola con concurrencia 1 y prefetch 1 |
 
-El coordinador publica fotogramas JPEG codificados en base64. El worker devuelve detecciones, su hostname y tiempos. Redis se alcanza por loopback en cada laptop, pero en Pavilion ese acceso depende del túnel SSH. El túnel debe mantenerse abierto; no depende de Internet.
+El coordinador publica fotogramas JPEG codificados en base64. El worker devuelve detecciones, su hostname y tiempos. Redis se alcanza por loopback en cada laptop; en Pavilion ese acceso depende del túnel SSH supervisado por systemd. No depende de Internet ni de una terminal abierta.
 
 ## Archivos importantes
 
@@ -36,6 +52,9 @@ El coordinador publica fotogramas JPEG codificados en base64. El worker devuelve
 - `src/monitor.py`: agente/panel de monitoreo, gráficas y eventos.
 - `resultados/`: CSV de pruebas y análisis Markdown.
 - `config/`: inventarios de dependencias, configuración y huellas del modelo cuando se capturen.
+- `docs/informe-tecnico-arq2.pdf`: informe final con enlace al video y anexos visuales.
+- `docs/evidencias/`: fotografías y capturas originales del montaje, detecciones y monitoreo.
+- `servicios/`: unidades systemd del túnel de ProBook y del worker y agente de Pavilion. No contienen claves privadas.
 - `.venv/`: entorno de cada laptop, no se copia entre equipos ni se versiona.
 - `yolo11n_openvino_model/`: modelo exportado, disponible localmente en ambas laptops. Está excluido del Git según la configuración inicial: respaldarlo aparte.
 
@@ -63,7 +82,7 @@ Las dependencias principales son PyTorch CPU, torchvision, Ultralytics 8.4.177, 
 
 ## Arranque desde equipos encendidos
 
-Mantener cada proceso indicado en una terminal distinta. Los comandos siguientes no son instrucciones para lanzar duplicados de workers ya activos. Si se retoma una sesión, comprobar primero con `pgrep -af 'celery.*src.cluster_tasks'` en cada equipo.
+El túnel, el worker de Pavilion y su agente de monitoreo están instalados como servicios systemd. El worker local, el panel y la cámara de ProBook se inician en terminales separadas. No iniciar copias manuales de procesos ya supervisados por los servicios.
 
 ### 1. Comprobaciones de red y Redis — ProBook local
 
@@ -75,21 +94,22 @@ redis-cli ping
 
 Redis debe responder `PONG`. Si el servicio no está activo, iniciarlo con `sudo systemctl start redis-server` y repetir la comprobación. Si la red falla, revisar direcciones, cables, switch e interfaces antes de iniciar inferencias.
 
-### 2. Worker Pavilion mediante túnel — terminal de ProBook
+### 2. Túnel y worker remoto — servicios instalados
 
 ```bash
-ssh -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -R 127.0.0.1:6379:127.0.0.1:6379 user@192.168.100.11
+sudo systemctl start arq2-tunnel.service
+systemctl status arq2-tunnel.service --no-pager
 ```
 
-El prompt cambia a `user@arq2-worker`. Dentro de esa sesión:
+Los comandos anteriores se ejecutan en ProBook. Directamente en Pavilion:
 
 ```bash
-cd ~/arq2-camera
-source .venv/bin/activate
-celery -A src.cluster_tasks:app worker --loglevel=INFO --concurrency=1 --hostname=pavilion@%h --queues=cluster --prefetch-multiplier=1
+sudo systemctl start arq2-worker.service
+systemctl status arq2-worker.service --no-pager
+sudo journalctl -u arq2-worker.service -n 20 --no-pager
 ```
 
-Esperar `ready`. Dejar esta terminal abierta: mantiene el túnel y el worker. Un error al reservar el puerto remoto 6379 indica que hay otra sesión o servicio ocupándolo; no continuar con un segundo worker sin revisar.
+Comprobar conexión a Redis y tareas nuevas `received`/`succeeded`. Los servicios habilitados arrancan con el equipo. Si el túnel informa `remote port forwarding failed`, revisar en Pavilion `sudo ss -ltnp 'sport = :6379'`: una sesión anterior puede ocupar el puerto. Identificarla antes de cerrarla; no detener Redis ni terminar procesos SSH indiscriminadamente.
 
 ### 3. Worker ProBook — otra terminal LOCAL
 
@@ -101,15 +121,14 @@ celery -A src.cluster_tasks:app worker --loglevel=INFO --concurrency=1 --hostnam
 
 Esperar `ready` y mantener abierto.
 
-### 4. Agente de monitoreo — terminal directa en Pavilion
+### 4. Agente de monitoreo — servicio en Pavilion
 
 ```bash
-cd ~/arq2-camera
-source .venv/bin/activate
-python -m src.monitor agent --interface enxec9a0c000d47
+sudo systemctl start arq2-monitor-agent.service
+systemctl status arq2-monitor-agent.service --no-pager
 ```
 
-Abrirlo directamente en Pavilion permite que el agente sobreviva al cierre de la sesión SSH de Celery. Mantener abierto.
+No necesita una terminal abierta. Comprobar la respuesta en `http://192.168.100.11:8765/metrics`. Este agente y Celery son independientes: la ausencia de telemetría no demuestra que el worker haya dejado de procesar.
 
 ### 5. Panel — otra terminal LOCAL de ProBook
 
@@ -150,9 +169,13 @@ El software suministrado de monitoreo no carga librerías web externas. El model
 2. Para la prueba de video ante ausencia del worker se utilizó `--timeout 5 --max-pending 2`, después del calentamiento. Un límite corto puede descartar tareas lentas; no usarlo como tiempo de arranque del modelo.
 3. Marcar Inicio; registrar el estado normal. Marcar Desconecto Pavilion al retirar únicamente su cable Ethernet.
 4. Verificar que continúan resultados de `arq2-master`, no solo que se actualiza una imagen local de la cámara.
-5. Marcar Reconecto Pavilion al reconectar el cable. El agente de monitoreo puede recuperarse si continúa ejecutándose localmente.
-6. Si se perdió el SSH, revisar en Pavilion `pgrep -af 'celery.*src.cluster_tasks'` antes de abrir otro worker. Restablecer el túnel y el worker del paso 2 si es necesario. No afirmar que esta recuperación sea automática.
-7. Confirmar que regresan resultados de `arq2-worker`. Marcar Fin y terminar la cámara con `q`.
+5. Tras unos 30 segundos de desconexión, reconectar el cable y marcar Reconecto Pavilion.
+6. Sin ejecutar comandos ni reiniciar procesos, observar el regreso de nuevas tareas de Pavilion y del estado Responde en el panel. Esperar hasta 60 segundos como margen del ensayo, no como garantía de recuperación.
+7. Confirmar ambos retornos, marcar Fin y terminar la cámara con `q`. Si no regresan, conservar los registros y consultar los servicios antes de iniciar procesos adicionales.
+
+En un ensayo posterior a la instalación de systemd, el operador observó el retorno automático de tareas de Pavilion aproximadamente 10 segundos después de reconectar el cable. Tras instalar el agente como servicio, se repitió la prueba y se confirmó el regreso de tareas y telemetría sin intervención manual. Los 10 segundos son una estimación del primer ensayo, no un promedio, un P95 ni un tiempo medido desde los CSV originales. No se aportaron nuevos CSV de estos ensayos para un análisis temporal independiente.
+
+Diagnóstico: en ProBook, `sudo journalctl -u arq2-tunnel.service -n 30 --no-pager`; en Pavilion, `sudo journalctl -u arq2-worker.service -n 30 --no-pager` y `sudo journalctl -u arq2-monitor-agent.service -n 30 --no-pager`. Los keepalives detectan fallos; systemd reinicia el cliente SSH y Celery reintenta su conexión. La recuperación no es instantánea ni garantiza cada tarea pendiente.
 
 La configuración de tareas incluye confirmación tardía y rechazo si se pierde un proceso de worker. Una pérdida de conectividad de un nodo completo no equivale a matar un hijo de Celery; la recuperación de tareas no confirmadas depende del tiempo de visibilidad de Redis (habitualmente 1 hora salvo configuración distinta). El coordinador registra resultados exitosos y puede descartar tareas vencidas. La prueba realizada demuestra continuidad de inferencia y reincorporación, no entrega garantizada de cada fotograma.
 
@@ -182,10 +205,18 @@ Los CSV nuevos del monitor contienen UTC y hora local con desplazamiento. Los CS
 
 ## Cierre y conservación
 
-- Terminar cámara con `q`; marcar Fin en el panel; detener panel/agente con Ctrl+C cuando se hayan guardado las evidencias.
-- Detener workers con Ctrl+C una sola vez y esperar el cierre; después ejecutar `exit` en la terminal SSH para cerrar el túnel.
+- Terminar cámara con `q`; marcar Fin y detener el panel con Ctrl+C después de guardar las evidencias. Detener el worker local con Ctrl+C una sola vez y esperar su cierre.
+- Para detener el procesamiento remoto, ejecutar en Pavilion `sudo systemctl stop arq2-worker.service` y después en ProBook `sudo systemctl stop arq2-tunnel.service`. Para detener su agente, ejecutar en Pavilion `sudo systemctl stop arq2-monitor-agent.service`. Los servicios permanecen habilitados para el siguiente arranque; `stop` no equivale a `disable`.
 - Guardar código, manifiestos de configuración, CSV y análisis en Git. No añadir `.venv/`, cachés ni copias `.bak` de trabajo.
 - Git local no es una copia externa. Mantener una copia adicional del repositorio y del modelo en otro medio antes de una reinstalación o pérdida del disco.
 - No publicar secretos, claves privadas, contraseñas ni datos de cámaras con información personal.
 
 Guía preparada a partir de los comandos, código y evidencias de la conversación. No se ha validado aún el arranque completo desde un reinicio de ambas laptops siguiendo este documento; realizar un ensayo antes de la defensa.
+
+## Instalación de los servicios en una restauración
+
+Los archivos de unidad se incluyen en `servicios/` de este repositorio. Se instalan en `/etc/systemd/system/` del equipo correspondiente: `arq2-tunnel.service` en ProBook; `arq2-worker.service` y `arq2-monitor-agent.service` en Pavilion. Después de copiar cada archivo se ejecuta `sudo systemctl daemon-reload` y `sudo systemctl enable --now NOMBRE.service`.
+
+Las unidades utilizan el usuario `user` y el proyecto `/home/user/arq2-camera`. El túnel requiere la clave privada `/home/user/.ssh/arq2_cluster`, su clave pública autorizada en Pavilion y la identidad del servidor previamente verificada en `known_hosts`. La clave privada no se incluye en el paquete ni se versiona. En otro equipo se configura una clave propia y se ajustan rutas, usuario, direcciones e interfaz antes de instalar.
+
+El túnel utiliza `ssh -NT`, autenticación no interactiva, comprobación estricta de la identidad del servidor, keepalives de 10 segundos y dos comprobaciones fallidas. Systemd reintenta tras 5 segundos si el proceso termina. Estas opciones no establecen un plazo máximo garantizado de recuperación. El agente conserva el enlace HTTP limitado a la IP privada. Estos tres servicios no automatizan el arranque de Redis, la cámara, el panel ni el worker local de ProBook.

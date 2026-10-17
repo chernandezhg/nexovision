@@ -1,0 +1,17 @@
+[Unit]
+Description=Tunel SSH inverso del cluster ARQ2
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=user
+WorkingDirectory=/home/user/arq2-camera
+ExecStart=/usr/bin/ssh -NT -i /home/user/.ssh/arq2_cluster -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ExitOnForwardFailure=yes -o ServerAliveInterval=10 -o ServerAliveCountMax=2 -R 127.0.0.1:6379:127.0.0.1:6379 user@192.168.100.11
+Restart=always
+RestartSec=5
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

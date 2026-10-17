@@ -1,0 +1,22 @@
+[Unit]
+Description=Worker Celery de Pavilion para el cluster ARQ2
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=user
+WorkingDirectory=/home/user/arq2-camera
+Environment=REDIS_URL=redis://127.0.0.1:6379/0
+Environment=MODEL_PATH=/home/user/arq2-camera/yolo11n_openvino_model
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/user/arq2-camera/.venv/bin/celery -A src.cluster_tasks:app worker --loglevel=INFO --concurrency=1 --hostname=pavilion@%%h --queues=cluster --prefetch-multiplier=1
+Restart=always
+RestartSec=5
+TimeoutStopSec=90
+KillSignal=SIGTERM
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
